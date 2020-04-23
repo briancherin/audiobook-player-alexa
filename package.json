@@ -1,0 +1,23 @@
+{
+  "name": "my-audiobook-player",
+  "version": "2.0.0",
+  "description": "My Audiobook Player.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "postinstall": "npm rebuild grpc --target=10.16.0 --target_arch=x64 --target_platform=linux --target_libc=glibc"
+  },
+  "keywords": [
+    "alexa",
+    "skill",
+    "fact"
+  ],
+  "author": "Brian Cherin",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "ask-sdk": "^2.0.0",
+    "aws-sdk": "^2.504.0",
+    "firebase": "^7.7.0",
+    "jwt-decode": "^2.2.0"
+  }
+}
