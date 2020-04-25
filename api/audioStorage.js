@@ -31,9 +31,10 @@ async function extractBookListFromFirebase() {
 }
 
 
-async function getAudioStreamUrl(bookKey) {
+async function getAudioStreamUrl(bookObject) {
 	const uid = getCurrentUserId();
-	const bookStorageRef = firebaseObject.storage().ref().child("books").child(uid).child(bookKey);
+	const bookFileName = bookObject.id + "." + bookObject.fileExtension;
+	const bookStorageRef = firebaseObject.storage().ref().child("books").child(uid).child(bookFileName);
 	return await bookStorageRef.getDownloadURL();
 }
 

@@ -155,7 +155,7 @@ const PlayBookIntentHandler = {
 
       //A valid book was found in the list of books:
       if (bookObject) {
-        const bookUrl = await helper.getBookAudioUrl(requestedBookKey);
+        const bookUrl = await helper.getBookAudioUrl(bookObject);
 
         const audioDirective = alexaHelper.generatePlayDirective(bookObject, bookUrl);
 
@@ -431,8 +431,8 @@ const helper = {
   getCurrentBookId: function(handlerInput) {
     return handlerInput.attributesManager.getSessionAttributes().currentBookId;
   },
-  getBookAudioUrl: async function(bookId) {
-    const url = await audioStorage.getAudioStreamUrl(bookId);
+  getBookAudioUrl: async function(bookObject) {
+    const url = await audioStorage.getAudioStreamUrl(bookObject);
     return url;
   },
   getDynamicSlotValue: function(slotObject) {
