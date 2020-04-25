@@ -115,7 +115,7 @@ const PlayBookIntentHandler = {
     return request.type === 'IntentRequest'
       && request.intent.name === 'PlayBookIntent';
   },
-  handle(handlerInput) {
+  async handle(handlerInput) {
     const request = handlerInput.requestEnvelope.request;
 
     const bookSlotValue = helper.getDynamicSlotValue(request.intent.slots.book);
