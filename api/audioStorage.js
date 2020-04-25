@@ -3,7 +3,7 @@ var firebaseObject;
 
 function initialize(p_firebaseManager) {
 	firebaseManager = p_firebaseManager;
-	firebaseObject = firebaseManager.getFirebaseObject;
+	firebaseObject = firebaseManager.getFirebaseObject();
 }
 
 async function extractBookListFromFirebase() {
