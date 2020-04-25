@@ -124,11 +124,34 @@ const PlayBookIntentHandler = {
 
     if (bookSlotValue) { //If the book the user requested is valid and is in their library
 
+
+      //TODO: Put this into a helper function? (Duplicated from LaunchHandler. Problem: How to deal with Alexa speech returns?)
+      //Alternatively, deal with logging in (given access token) in firebaseManager? But that would disallow error alertion to user.
+
+    //NEED TO RE-LOGIN TO FIREBASE.
+    // Retrieve access token associated with the user, in order to log into 
+    //firebase with this user's account
+    const accessToken = handlerInput.requestEnvelope.context.System.user.accessToken;
+    var user;
+    await firebaseManager
+      .signIn(accessToken)
+      .catch(() => {
+        speechOutput = "I'm sorry, there was a problem connecting to your account. Please try again later.";
+        
+        return handlerInput.responseBuilder
+          .speak(speechOutput)
+          .withSimpleCard(SKILL_NAME, speechOutput)
+          .getResponse();
+      })
+      .then(signed_in_user => {
+        user = signed_in_user;
+      });
+
       const requestedBookKey = bookSlotValue.id;
 
       helper.setCurrentBookId(handlerInput, requestedBookKey);
 
-      const bookObject = helper.getBookList().filter(book => book.id === requestedBookKey)[0];
+      const bookObject = helper.getBookList(handlerInput).filter(book => book.id === requestedBookKey)[0];
 
       //A valid book was found in the list of books:
       if (bookObject) {
@@ -442,7 +465,7 @@ const helper = {
 
   updateDatabaseTimestamp: function(handlerInput, currTimestamp) {
     let deviceId = getDeviceId(handlerInput);
-    audioStorage.updateDatabaseTimestamp(this.getCurrentBookId(), currTimestamp, deviceId);
+    audioStorage.updateDatabaseTimestamp(this.getCurrentBookId(handlerInput), currTimestamp, deviceId);
   },
   getDeviceId: function(handlerInput) {
     return handlerInput.requestEnvelope.context.System.device.deviceId;
