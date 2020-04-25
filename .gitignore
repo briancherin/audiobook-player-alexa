@@ -1,4 +1,4 @@
-firebase_config
-aws_params
+firebase_config.js
+aws_params.js
 lambda_upload.txt
 node_modules/*

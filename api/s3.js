@@ -2,7 +2,7 @@ const AWS = require('aws-sdk');
 
 const jwt_decode = require('jwt-decode');
 
-const aws_params = require('aws_params');
+const aws_params = require('./aws_params');
 
 function init(accessToken) {
 
