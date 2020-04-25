@@ -3,17 +3,12 @@
 
 const Alexa = require('ask-sdk');
 
-const audioStorage = require('./api/audioStorage');
 const alexaHelper = require('./api/alexaHelper');
 
-const firebase = require('firebase');
-require('firebase/auth');
-require('firebase/database');
-require('firebase/storage');
-
-const firebase_config = require("./firebase_config");
- 
-firebase.initializeApp(firebase_config.firebaseConfig);
+const factory = require('./api/factory');
+factory.initialize();
+const firebaseManager = factory.getFirebaseInstance();
+const audioStorage = factory.getAudioStorageInstance();
 
 
 const LaunchHandler = {
@@ -25,9 +20,11 @@ const LaunchHandler = {
 	  
     var speechOutput = GET_LAUNCH_MESSAGE;
 
-    
+    // Retrieve access token associated with the user, in order to log into 
+    //firebase with this user's account
     const accessToken = handlerInput.requestEnvelope.context.System.user.accessToken;
     
+    // If the user has not set up account linking with firebase yet, prompt the user to do so.
     if (!accessToken) {
       speechOutput = "Please link your account with Alexa. Visit myaudiobookplayer.com to create your account, if you do not have one already.";
       return handlerInput.responseBuilder
@@ -35,31 +32,31 @@ const LaunchHandler = {
         .withSimpleCard(SKILL_NAME, speechOutput)
         .getResponse();
     }
-      
-    await firebase
-      .auth()
-      .signInWithCustomToken(accessToken)
-      .catch((error) => {
-        const errorCode = error.code;
-        const errorMessage = error.message;
-        console.log(errorMessage);
+
+    //If the user has already set up account linking, use the access token to 
+    //begin the firebase session with this user's account
+    var user;
+  
+    await firebaseManager
+      .signIn(accessToken)
+      .catch(() => {
         speechOutput = "I'm sorry, there was a problem connecting to your account. Please try again later.";
         
         return handlerInput.responseBuilder
           .speak(speechOutput)
           .withSimpleCard(SKILL_NAME, speechOutput)
           .getResponse();
-        
+      })
+      .then(signed_in_user => {
+        user = signed_in_user;
       });
       
-    const user = firebase.auth().currentUser;
-    
+    //Login successful:
     if (user) {
-      //Login successful
       speechText = "Welcome to My Audiobook Player. What audiobook would you like to play? You can say 'help' for more options.";
       
       //Fetch the list of the user's audiobooks
-      var bookList = await audioStorage.extractBookListFromFirebase(firebase);
+      var bookList = await audioStorage.extractBookListFromFirebase();
       
       //For dyanmic slot types, the booklist must have 100 or less books
       bookList = bookList.slice(0, 100)
@@ -70,10 +67,11 @@ const LaunchHandler = {
       var replaceEntityDirective = {
         type: 'Dialog.UpdateDynamicEntities',
         updateBehavior: 'REPLACE',
-        types: helper.getDynamicSlotTypesObject(bookList)
+        types: alexaHelper.getDynamicSlotTypesObject(bookList)
       };
 
-      await firebase.auth().signOut();
+      //This is necessary to prevent Alexa from stalling. (This may not be true.)
+      await firebaseManager.terminateSession();
 
       return handlerInput.responseBuilder
         .speak(speechOutput)
@@ -82,9 +80,10 @@ const LaunchHandler = {
         .addDirective(replaceEntityDirective)
         .getResponse();
     } 
-    //USER ACCOUNT NOT LINKED:
+    //USER ACCOUNT NOT LINKED: (or at least an error caused user to be undefined)
     else {
-      speechOutput = "Please link your account with Alexa. Visit myaudiobookplayer.com to create your account, if you do not have one already.";
+      speechOutput = "Sorry, something went wrong. Ensure that you have linked your account with Alexa. \
+      Visit myaudiobookplayer.com to create your account, if you do not have one already.";
       return handlerInput.responseBuilder
         .speak(speechOutput)
         .withSimpleCard(SKILL_NAME, speechOutput)
@@ -119,35 +118,48 @@ const PlayBookIntentHandler = {
   handle(handlerInput) {
     const request = handlerInput.requestEnvelope.request;
 
-    //TODO: Make sure the slot value is there.
-    // const requestedBookKey = request.intent.slots.book.resolutions.resolutionsPerAuthority[0].values[0].value.id;
     const bookSlotValue = helper.getDynamicSlotValue(request.intent.slots.book);
 
     if (bookSlotValue) { //If the book the user requested is valid and is in their library
 
       const requestedBookKey = bookSlotValue.id;
-      const requestedBookName = bookSlotValue.name;
 
       helper.setCurrentBookId(requestedBookKey);
 
-       //TODO: Check if bookList() valid and if valid book found?
-      const bookObject = helper.getBookList().filter(book => book.id === requestedBookKey);
+      const bookObject = helper.getBookList().filter(book => book.id === requestedBookKey)[0];
 
-      const bookUrl = helper.getBookAudioUrl(requestedBookKey);
+      //A valid book was found in the list of books:
+      if (bookObject) {
+        const bookUrl = await helper.getBookAudioUrl(requestedBookKey);
 
-      const audioDirective = alexaHelper.generatePlayDirective(bookObject);
+        const audioDirective = alexaHelper.generatePlayDirective(bookObject, bookUrl);
 
-      const speechOutput = "Okay, playing " + requestedBookName + ".";
+        const speechOutput = "Okay, playing " + bookObject.title + ".";
 
-      return handlerInput.responseBuilder
-        .speak(speechOutput)
-        .addDirective(audioDirective)
-        .getResponse();
-    } else {  //No valid book was requested
+        return handlerInput.responseBuilder
+          .speak(speechOutput)
+          .addDirective(audioDirective)
+          .getResponse();
+      }
+      //The requested book was not found in the list of books
+      else {
+        console.error("ERROR: Requested audiobook was not found in the list of audiobooks.");
+        const speechOutput = "I'm sorry, something went wrong. Please try again later.";
+        const helpMessage = "You can tell me what audiobook to play, or ask me to list the audiobooks in your library."
+        return handlerInput.responseBuilder
+          .speak(speechOutput)
+          .reprompt(helpMessage)
+          .getResponse();
+      }   
+    } 
+    //No valid book was requested:
+    else {  
+      console.error("ERROR: The requested book (in slot value) was not found in the list of possible slot values. (i.e. not in the user's library.)")
       const speechOutput = "I'm sorry, I couldn't find that book in your library. Please try again.";
+      const helpMessage = "You can tell me what audiobook to play, or ask me to list the audiobooks in your library."
       return handlerInput.responseBuilder
         .speak(speechOutput)
-        .reprompt(speechOutput) //TODO: Put help message here
+        .reprompt(helpMessage) 
         .getResponse();
     }
   }
@@ -163,7 +175,6 @@ const PauseIntentHandler = {
 
     //Send AudioPlayer.Stop directive. This will also trigger the updating of 
     //the database timestamp (through the PlaybackStopped request)
-
     let stopDirective = alexaHelper.generateStopDirective();
 
     return handlerInput.responseBuilder
@@ -180,6 +191,7 @@ const ResumeIntentHandler = {
   },
   handle(handlerInput) {
     //TODO: implement
+    const msg = "Sorry, I can't resume yet.";
     return handlerInput.responseBuilder
       .speak(msg)
       .getResponse();
@@ -210,7 +222,7 @@ const TimeSkipIntentHandler = {
           request.intent.name === 'AMAZON.PreviousIntent');
   },
   handle(handlerInput) {
-    const msg = "Sorry, I can't move forward or backwards through an audiobook yet."
+    const msg = "Sorry, I can't move forward or backwards through an audiobook yet.";
     //TODO: Implement this.
     return handlerInput.responseBuilder
       .speak(msg)
@@ -226,7 +238,7 @@ const ShuffleIntentHandler = {
           request.intent.name === 'AMAZON.ShuffleOffIntent');
   },
   handle(handlerInput) {
-    const msg = "Sorry, I can't shuffle an audiobook."
+    const msg = "Sorry, I can't shuffle an audiobook.";
     return handlerInput.responseBuilder
       .speak(msg)
       .getResponse();
@@ -240,7 +252,7 @@ const StartOverIntent = {
       && request.intent.name === 'AMAZON.StartOverIntent';
   },
   handle(handlerInput) {
-    const msg = "Sorry, I can't start an audiobook over yet."
+    const msg = "Sorry, I can't start an audiobook over yet.";
     //TODO: Allow for this?
     return handlerInput.responseBuilder
       .speak(msg)
@@ -255,8 +267,9 @@ const RepeatIntent = {
       && request.intent.name === 'AMAZON.RepeatIntent';
   },
   handle(handlerInput) {
-    const msg = "Sorry, I can't repeat an audiobook."
-    //TODO: Allow for this?
+    const msg = "Sorry, I can't repeat an audiobook.";
+    //TODO: Change response depending on current state. E.g. could repeat menu options. (Or does alexa do this by default?)
+    //(Either way, this handler currently would override ALL requests to repeat. So fix that.)
     return handlerInput.responseBuilder
       .speak(msg)
       .getResponse();
@@ -273,6 +286,7 @@ const PlaybackStoppedHandler = {
   handle(handlerInput) {
     const currentTimestamp = handlerInput.requestEnvelope.request.offsetInMilliseconds;
     helper.updateDatabaseTimestamp(handlerInput, currentTimestamp);
+    console.log("Triggered database update with timestamp " + currentTimestamp + " for audiobook ." + helper.getCurrentBookId(handlerInput));
   }
 }
 
@@ -340,7 +354,7 @@ const ErrorHandler = {
 
 const SKILL_NAME = 'My Audiobook Player';
 const GET_LAUNCH_MESSAGE = 'Welcome to My Audiobook Player!';
-const HELP_MESSAGE = 'You can say tell my what audiobooks I have, or, you can say exit... What can I help you with?';
+const HELP_MESSAGE = 'You can say, tell me what audiobooks I have, or, you can tell me to play a specific audiobook in your library, or, you can say exit... What can I help you with?';
 const HELP_REPROMPT = 'What can I help you with?';
 const STOP_MESSAGE = 'Goodbye!';
 
@@ -355,15 +369,16 @@ const helper = {
     
   },
   setBookList: function(handlerInput, bookList) {
-	const sessionAttributes = handlerInput.attributesManager.getSessionAttributes();
-	sessionAttributes.bookList = bookList;
+    const sessionAttributes = handlerInput.attributesManager.getSessionAttributes();
+    sessionAttributes.bookList = bookList;
   },
   getBookList: function(handlerInput) {
-	return handlerInput.attributesManager.getSessionAttributes().bookList;  
+    let list = handlerInput.attributesManager.getSessionAttributes().bookList;  
+    if (list === undefined) list = [];
+    return list;
   },
   getBookTitles: function(handlerInput) {
-	const bookList = this.getBookList(handlerInput);
-	return bookList.map((book) => book.title);
+	  return this.getBookList(handlerInput).map((book) => book.title);
   },
   setCurrentBookId: function(handlerInput, bookId) {
     const sessionAttributes = handlerInput.attributesManager.getSessionAttributes();
@@ -373,7 +388,7 @@ const helper = {
     return handlerInput.attributesManager.getSessionAttributes().currentBookId;
   },
   getBookAudioUrl: async function(bookId) {
-    const url = await audioStorage.getAudioStreamUrl(firebase, bookId);
+    const url = await audioStorage.getAudioStreamUrl(bookId);
     return url;
   },
   getDynamicSlotValue: function(slotObject) {
@@ -386,6 +401,7 @@ const helper = {
             
             const value = authority.values[0];  //TODO: Could there be multiple values resolved? (i.e. index 0 might be incorrect)
 
+            //Object describing id and name of the requested audiobook:
             return {
               id: value.id,
               name: value.name
@@ -398,26 +414,10 @@ const helper = {
     //Return undefined if no valid dynamic slot value was found
     return undefined;
   },
-  getDynamicSlotTypesObject: function(bookList) {
-    return [
-      {
-        name: 'book',
-        values: bookList.map(book => (
-          {
-            id: book.id,
-            name: {
-              value: book.title,
-              synonyms: []
-            }
-          }
-        ))
-      }
-    ];
-  },
 
   updateDatabaseTimestamp: function(handlerInput, currTimestamp) {
     let deviceId = getDeviceId(handlerInput);
-    audioStorage.updateDatabaseTimestamp(firebase, heper.getCurrentBookId(), currTimestamp, deviceId);
+    audioStorage.updateDatabaseTimestamp(this.getCurrentBookId(), currTimestamp, deviceId);
   },
   getDeviceId: function(handlerInput) {
     return handlerInput.requestEnvelope.context.System.device.deviceId;

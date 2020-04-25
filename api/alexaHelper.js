@@ -1,5 +1,5 @@
 
-function generatePlayDirective(bookObject) {
+function generatePlayDirective(bookObject, bookUrl) {
     return ({
         type: 'AudioPlayer.Play',
         playBehavior: 'REPLACE_ALL',
@@ -37,7 +37,27 @@ function generateStopDirective() {
     });
 }
 
+//Object sent to ALexa to populate the dynamic slot type for book titles.
+//Takes the book titles associated with this user's library
+function getDynamicSlotTypesObject(bookList) {
+  return [
+    {
+      name: 'book',
+      values: bookList.map(book => (
+        {
+          id: book.id,
+          name: {
+            value: book.title,
+            synonyms: []
+          }
+        }
+      ))
+    }
+  ];
+}
+
 module.exports = {
     generatePlayDirective,
-    generateStopDirective
+    generateStopDirective,
+    getDynamicSlotTypesObject
 }
