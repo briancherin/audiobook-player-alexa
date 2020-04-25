@@ -4,6 +4,7 @@
 const Alexa = require('ask-sdk');
 
 const audioStorage = require('./api/audioStorage');
+const alexaHelper = require('./api/alexaHelper');
 
 const firebase = require('firebase');
 require('firebase/auth');
@@ -127,40 +128,14 @@ const PlayBookIntentHandler = {
       const requestedBookKey = bookSlotValue.id;
       const requestedBookName = bookSlotValue.name;
 
+      helper.setCurrentBookId(requestedBookKey);
+
        //TODO: Check if bookList() valid and if valid book found?
       const bookObject = helper.getBookList().filter(book => book.id === requestedBookKey);
 
       const bookUrl = helper.getBookAudioUrl(requestedBookKey);
 
-      const audioDirective = {
-        type: 'AudioPlayer.Play',
-        playBehavior: 'REPLACE_ALL',
-        audioItem: {
-          stream: {
-            url: bookUrl,
-            token: "audiobook-" + requestedBookName,
-            offsetInMilliseconds: bookObject.currentPositionMillis
-          },
-          metadata: {
-            title: requestedBookName,
-            subtitle: "", //TODO: Author?
-            art: {
-              sources: [
-                {
-                  url: "" //TODO: Cover?
-                }
-              ]
-            }
-          },
-          backgroundImage: {
-            sources: [
-              {
-                url: "" //TODO: Cover?
-              }
-            ]
-          }
-        }
-      };
+      const audioDirective = alexaHelper.generatePlayDirective(bookObject);
 
       const speechOutput = "Okay, playing " + requestedBookName + ".";
 
@@ -178,22 +153,26 @@ const PlayBookIntentHandler = {
   }
 };
 
-const PauseIntent = {
+const PauseIntentHandler = {
   canHandle(handlerInput) {
     const request = handlerInput.requestEnvelope.request;
     return request.type === 'IntentRequest'
       && request.intent.name === 'AMAZON.PauseIntent';
   },
   handle(handlerInput) {
-    
-    //TODO: Implement
+
+    //Send AudioPlayer.Stop directive. This will also trigger the updating of 
+    //the database timestamp (through the PlaybackStopped request)
+
+    let stopDirective = alexaHelper.generateStopDirective();
+
     return handlerInput.responseBuilder
-      .speak(msg)
+      .addDirective(stopDirective)
       .getResponse();
   }
 };
 
-const ResumeIntent = {
+const ResumeIntentHandler = {
   canHandle(handlerInput) {
     const request = handlerInput.requestEnvelope.request;
     return request.type === 'IntentRequest'
@@ -284,6 +263,19 @@ const RepeatIntent = {
   }
 };
 
+//When playback has been stopped, update the current timestamp position to the database.
+//(Triggered whenever Stop directive is called.)
+const PlaybackStoppedHandler = {
+  canHandle(handlerInput) {
+    const request = handlerInput.requestEnvelope.request;
+    return request.type === 'AudioPlayer.PlaybackStopped';
+  },
+  handle(handlerInput) {
+    const currentTimestamp = handlerInput.requestEnvelope.request.offsetInMilliseconds;
+    helper.updateDatabaseTimestamp(handlerInput, currentTimestamp);
+  }
+}
+
 const HelpHandler = {
   canHandle(handlerInput) {
     const request = handlerInput.requestEnvelope.request;
@@ -373,6 +365,13 @@ const helper = {
 	const bookList = this.getBookList(handlerInput);
 	return bookList.map((book) => book.title);
   },
+  setCurrentBookId: function(handlerInput, bookId) {
+    const sessionAttributes = handlerInput.attributesManager.getSessionAttributes();
+    sessionAttributes.currentBookId = bookId;
+  },
+  getCurrentBookId: function(handlerInput) {
+    return handlerInput.attributesManager.getSessionAttributes().currentBookId;
+  },
   getBookAudioUrl: async function(bookId) {
     const url = await audioStorage.getAudioStreamUrl(firebase, bookId);
     return url;
@@ -414,6 +413,14 @@ const helper = {
         ))
       }
     ];
+  },
+
+  updateDatabaseTimestamp: function(handlerInput, currTimestamp) {
+    let deviceId = getDeviceId(handlerInput);
+    audioStorage.updateDatabaseTimestamp(firebase, heper.getCurrentBookId(), currTimestamp, deviceId);
+  },
+  getDeviceId: function(handlerInput) {
+    return handlerInput.requestEnvelope.context.System.device.deviceId;
   }
 
 }
@@ -431,13 +438,14 @@ exports.handler = (event, context, callback) => {
     LaunchHandler,
     ListBooksIntentHandler,
     PlayBookIntentHandler,
-    PauseIntent,
-    ResumeIntent,
+    PauseIntentHandler,
+    ResumeIntentHandler,
     LoopIntentHandler,
     TimeSkipIntentHandler,
     ShuffleIntentHandler,
     StartOverIntent,
     RepeatIntent,
+    PlaybackStoppedHandler,
     HelpHandler,
     ExitHandler,
     SessionEndedRequestHandler

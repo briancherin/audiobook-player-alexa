@@ -36,11 +36,22 @@ function getBooksRef(firebaseObject) {
 	return firebaseObject.database().ref().child("booksData").child(uid);
 }
 
+// Updates timestamp and lastDeviceUsed
+function updateDatabaseTimestamp(firebaseObject, bookKey, currTimestampMillis, deviceId) {
+	getBooksRef(firebaseObject).child(bookKey).update({
+		currentPositionMillis: currTimestampMillis,
+		lastDeviceUsed: deviceId
+	});
+}
+
+
+
 function getCurrentUserId(firebaseObject) {
 	return firebaseObject.auth().currentUser.uid;
 }
 
 module.exports = {
 	extractBookListFromFirebase,
-	getAudioStreamUrl
+	getAudioStreamUrl,
+	updateDatabaseTimestamp
 }
