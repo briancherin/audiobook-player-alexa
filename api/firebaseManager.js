@@ -3,6 +3,8 @@ require('firebase/auth');
 require('firebase/database');
 require('firebase/storage');
 
+global.XMLHttpRequest = require("xhr2");
+
 const firebase_config = require("../firebase_config");
  
 
