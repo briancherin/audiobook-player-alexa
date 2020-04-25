@@ -100,11 +100,13 @@ const ListBooksIntentHandler = {
   },
   handle(handlerInput) {
     const bookTitles = helper.getBookTitles(handlerInput);
-    const message = helper.getBooksListMessage(bookTitles);
-    const speechOutput = message;
+    const speechOutput = helper.getBooksListMessage(bookTitles) + " Which audiobook would you like me to play?";
+
+    repeat_message = speechOutput;  //Save the list in case the user asks to repeat
     
     return handlerInput.responseBuilder
       .speak(speechOutput)
+      .reprompt("Which audiobook would you like me to play? Say repeat to hear the list again.")
       .getResponse();
   }
 };
@@ -267,11 +269,13 @@ const RepeatIntent = {
       && request.intent.name === 'AMAZON.RepeatIntent';
   },
   handle(handlerInput) {
-    const msg = "Sorry, I can't repeat an audiobook.";
+    //const msg = "Sorry, I can't repeat an audiobook.";
     //TODO: Change response depending on current state. E.g. could repeat menu options. (Or does alexa do this by default?)
     //(Either way, this handler currently would override ALL requests to repeat. So fix that.)
+    const msg = repeat_message;
     return handlerInput.responseBuilder
       .speak(msg)
+      .reprompt(msg)
       .getResponse();
   }
 };
@@ -338,6 +342,22 @@ const SessionEndedRequestHandler = {
   },
 };
 
+const FallbackIntentHandler = {
+  canHandle(handlerInput) {
+    const request = handlerInput.requestEnvelope.request;
+    return request.type === 'IntentRequest'
+      && request.intent.name === 'AMAZON.FallbackIntent';
+  },
+  handle(handlerInput) {
+    const msg = "Sorry, I don't know how to help with that. " + HELP_MESSAGE;
+
+    return handlerInput.responseBuilder
+      .speak(msg)
+      .reprompt(HELP_MESSAGE)
+      .getResponse();
+  }
+};
+
 const ErrorHandler = {
   canHandle() {
     return true;
@@ -358,6 +378,7 @@ const HELP_MESSAGE = 'You can say, tell me what audiobooks I have, or, you can t
 const HELP_REPROMPT = 'What can I help you with?';
 const STOP_MESSAGE = 'Goodbye!';
 
+var repeat_message = "Sorry, I'm not sure what to repeat. Try saying the original command again, or say help to hear more options.";
 
 const helper = {
   getBooksListMessage: function(bookTitles) {
@@ -392,27 +413,31 @@ const helper = {
     return url;
   },
   getDynamicSlotValue: function(slotObject) {
+    
+    let bookSlotObject = undefined;
+
     //Ensure a value for the slot was found
     if (slotObject.resolutions && slotObject.resolutions.resolutionsPerAuthority) {
       slotObject.resolutions.resolutionsPerAuthority.forEach((authority => {
         //Only check to see if a dynamic slot entity was captured
-        if (authority.authority.includes('amzn1.er-authority.echo-sdk.dynamic')) {
+        //(And if bookSlotObject has already been set, do nothing. TODO: change this? (could there be multiple possible correct values?))
+        if (bookSlotObject === undefined && authority.authority.includes('amzn1.er-authority.echo-sdk.dynamic')) {
+
           if (authority.values && authority.values.length > 0) {  //Ensure there are values
-            
-            const value = authority.values[0];  //TODO: Could there be multiple values resolved? (i.e. index 0 might be incorrect)
+            const value = authority.values[0].value;  //TODO: Could there be multiple values resolved? (i.e. index 0 might be incorrect)
 
             //Object describing id and name of the requested audiobook:
-            return {
+            bookSlotObject = {
               id: value.id,
               name: value.name
-            };
+            }
+
           }
         }
       }));
     }
 
-    //Return undefined if no valid dynamic slot value was found
-    return undefined;
+    return bookSlotObject;
   },
 
   updateDatabaseTimestamp: function(handlerInput, currTimestamp) {
@@ -447,8 +472,9 @@ exports.handler = (event, context, callback) => {
     RepeatIntent,
     PlaybackStoppedHandler,
     HelpHandler,
-    ExitHandler,
-    SessionEndedRequestHandler
+    SessionEndedRequestHandler,
+    FallbackIntentHandler,
+    ExitHandler
   )
   .addErrorHandlers(ErrorHandler)
   .lambda()(event, context, callback);
