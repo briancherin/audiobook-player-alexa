@@ -126,7 +126,7 @@ const PlayBookIntentHandler = {
 
       const requestedBookKey = bookSlotValue.id;
 
-      helper.setCurrentBookId(requestedBookKey);
+      helper.setCurrentBookId(handlerInput, requestedBookKey);
 
       const bookObject = helper.getBookList().filter(book => book.id === requestedBookKey)[0];
 
