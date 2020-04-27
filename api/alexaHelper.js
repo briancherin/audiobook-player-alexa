@@ -6,7 +6,7 @@ function generatePlayDirective(bookObject, bookUrl) {
         audioItem: {
           stream: {
             url: bookUrl,
-            token: "audiobook-" + bookObject.title,
+            token: ("audiobook-" + bookObject.title).substring(0, 500), //Token cannot exceed 1024 characters
             offsetInMilliseconds: bookObject.currentPositionMillis
           },
           metadata: {
@@ -18,14 +18,14 @@ function generatePlayDirective(bookObject, bookUrl) {
                   url: "" //TODO: Cover?
                 }
               ]
+            },
+            backgroundImage: {
+              sources: [
+                {
+                  url: "" //TODO: Cover?
+                }
+              ]
             }
-          },
-          backgroundImage: {
-            sources: [
-              {
-                url: "" //TODO: Cover?
-              }
-            ]
           }
         }
       });
