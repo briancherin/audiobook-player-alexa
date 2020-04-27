@@ -49,7 +49,7 @@ function getBooksRef() {
 function updateDatabaseTimestamp(bookKey, currTimestampMillis, deviceId) {
 	getBooksRef().child(bookKey).update({
 		currentPositionMillis: currTimestampMillis,
-		lastDeviceUsed: deviceId
+		lastDeviceUsed: "alexa-" + deviceId
 	});
 }
 
