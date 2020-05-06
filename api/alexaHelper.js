@@ -1,3 +1,6 @@
+const ddbAdapter = require('ask-sdk-dynamodb-persistence-adapter');
+const ddbTableName = "Alexa-audiobook-player-persistent-attributes-table";
+
 
 function generatePlayDirective(bookObject, bookUrl) {
     return ({
@@ -6,7 +9,7 @@ function generatePlayDirective(bookObject, bookUrl) {
         audioItem: {
           stream: {
             url: bookUrl,
-            token: ("audiobook-" + bookObject.title).substring(0, 500), //Token cannot exceed 1024 characters
+            token: bookObject.id, //Token cannot exceed 1024 characters
             offsetInMilliseconds: bookObject.currentPositionMillis
           },
           metadata: {
@@ -56,8 +59,16 @@ function getDynamicSlotTypesObject(bookList) {
   ];
 }
 
+function getPersistenceAdapter() {
+  return new ddbAdapter.DynamoDbPersistenceAdapter({
+    tableName: ddbTableName,
+    createTable: true
+  });
+}
+
 module.exports = {
     generatePlayDirective,
     generateStopDirective,
-    getDynamicSlotTypesObject
+    getDynamicSlotTypesObject,
+    getPersistenceAdapter
 }

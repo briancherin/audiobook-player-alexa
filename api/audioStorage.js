@@ -46,11 +46,33 @@ function getBooksRef() {
 }
 
 // Updates timestamp and lastDeviceUsed
-function updateDatabaseTimestamp(bookKey, currTimestampMillis, deviceId) {
-	getBooksRef().child(bookKey).update({
-		currentPositionMillis: currTimestampMillis,
-		lastDeviceUsed: "alexa-" + deviceId
+async function updateDatabaseTimestamp(bookKey, currTimestampMillis, deviceId) {
+	return new Promise((resolve, reject) => {
+		getBooksRef().child(bookKey).update({
+			currentPositionMillis: currTimestampMillis,
+			lastDeviceUsed: "alexa-" + deviceId
+		}).then(() => {
+			resolve();
+		}).catch((error) => {
+			reject(error);
+		});
 	});
+	
+	
+}
+
+async function getDatabaseTimestamp(bookKey) {
+	return new Promise((resolve, reject) => {
+		getBooksRef().child(bookKey).once('value', function(snapshot) {
+			if (snapshot.length <= 0) {
+				reject("No book found with that key.");
+			} else {
+				let timestamp = snapshot[0].val().currentPositionMillis;
+				resolve(timestamp);
+			}
+		});
+	});
+	
 }
 
 
@@ -63,5 +85,6 @@ module.exports = {
 	initialize,
 	extractBookListFromFirebase,
 	getAudioStreamUrl,
-	updateDatabaseTimestamp
+	updateDatabaseTimestamp,
+	getDatabaseTimestamp
 }

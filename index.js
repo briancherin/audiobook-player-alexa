@@ -149,7 +149,8 @@ const PlayBookIntentHandler = {
 
       const requestedBookKey = bookSlotValue.id;
 
-      helper.setCurrentBookId(handlerInput, requestedBookKey);
+      //helper.setCurrentBookId(handlerInput, requestedBookKey);
+      await helper.setPersistentCurrentBookId(handlerInput, requestedBookKey);
 
       const bookObject = helper.getBookList(handlerInput).filter(book => book.id === requestedBookKey)[0];
 
@@ -193,10 +194,14 @@ const PlayBookIntentHandler = {
 const PauseIntentHandler = {
   canHandle(handlerInput) {
     const request = handlerInput.requestEnvelope.request;
-    return request.type === 'IntentRequest'
-      && request.intent.name === 'AMAZON.PauseIntent';
+    return (request.type === 'IntentRequest'
+      && request.intent.name === 'AMAZON.PauseIntent')
+        || request.type === 'PlaybackController.PauseCommandIssued';
   },
   handle(handlerInput) {
+
+    //Update the database timestamp with the current timestamp
+//    await helper.updateDatabaseTimestamp(handlerInput, currentTimestamp, bookId);
 
     //Send AudioPlayer.Stop directive. This will also trigger the updating of 
     //the database timestamp (through the PlaybackStopped request)
@@ -211,15 +216,56 @@ const PauseIntentHandler = {
 const ResumeIntentHandler = {
   canHandle(handlerInput) {
     const request = handlerInput.requestEnvelope.request;
-    return request.type === 'IntentRequest'
-      && request.intent.name === 'AMAZON.ResumeIntent';
+    return (request.type === 'IntentRequest'
+      && request.intent.name === 'AMAZON.ResumeIntent')
+      || request.type === 'PlaybackController.PlayCommandIssued';
   },
-  handle(handlerInput) {
-    //TODO: implement
-    const msg = "Sorry, I can't resume yet.";
-    return handlerInput.responseBuilder
-      .speak(msg)
-      .getResponse();
+  async handle(handlerInput) {
+
+    //NEED TO RE-LOGIN TO FIREBASE. 
+    //TODO: DO this somewhere else? Make better.
+   
+    // Retrieve access token associated with the user, in order to log into 
+    //firebase with this user's account
+    const accessToken = handlerInput.requestEnvelope.context.System.user.accessToken;
+    var user;
+    await firebaseManager
+      .signIn(accessToken)
+      .catch(() => {
+        speechOutput = "I'm sorry, there was a problem connecting to your account. Please try again later.";
+        
+        return handlerInput.responseBuilder
+          .speak(speechOutput)
+          .withSimpleCard(SKILL_NAME, speechOutput)
+          .getResponse();
+      })
+      .then(signed_in_user => {
+        user = signed_in_user;
+      });
+      //Re-fill the bookList (TODO: AGAIN, PUT THIS ALL IN A BIG CODE CHUNK SOMEWHERE ELSE)
+      var bookList = await audioStorage.extractBookListFromFirebase();
+      helper.setBookList(handlerInput, bookList);
+
+
+      const currentBookKey = await helper.getPersistentCurrentBookId(handlerInput);
+      const bookObject = helper.getBookList(handlerInput).filter(book => book.id === currentBookKey)[0];
+
+      console.log("IN RESUME HANDLER: currentBookKey = " + currentBookKey);
+
+      //Get current timestamp for this book, from database
+      const currTimestampMillis = await helper.getDatabaseTimestamp(bookObject.id);
+      
+      //TODO: Ensure that bookObject is not undefined. (This has happened, maybe from bad book key?)
+      bookObject.currentPositionMillis = currTimestampMillis;
+
+      const bookUrl = await helper.getBookAudioUrl(bookObject);
+
+      const audioDirective = alexaHelper.generatePlayDirective(bookObject, bookUrl);
+
+      return handlerInput.responseBuilder
+        .addDirective(audioDirective)
+        .getResponse();
+
   }
 };
 
@@ -242,9 +288,12 @@ const LoopIntentHandler = {
 const TimeSkipIntentHandler = {
   canHandle(handlerInput) {
     const request = handlerInput.requestEnvelope.request;
-    return request.type === 'IntentRequest'
-      && (request.intent.name === 'AMAZON.NextIntent' ||
-          request.intent.name === 'AMAZON.PreviousIntent');
+    //TODO: Split this up appropriately into skip forward / backward
+    return (request.type === 'PlaybackController.NextCommandIssued'
+      || request.type === 'PlaybackController.PreviousCommandIssued')
+      || (request.type === 'IntentRequest'
+        && (request.intent.name === 'AMAZON.NextIntent' ||
+            request.intent.name === 'AMAZON.PreviousIntent'));
   },
   handle(handlerInput) {
     const msg = "Sorry, I can't move forward or backwards through an audiobook yet.";
@@ -310,10 +359,11 @@ const PlaybackStoppedHandler = {
     const request = handlerInput.requestEnvelope.request;
     return request.type === 'AudioPlayer.PlaybackStopped';
   },
-  handle(handlerInput) {
+  async handle(handlerInput) {
     const currentTimestamp = handlerInput.requestEnvelope.request.offsetInMilliseconds;
-    helper.updateDatabaseTimestamp(handlerInput, currentTimestamp);
-    console.log("Triggered database update with timestamp " + currentTimestamp + " for audiobook ." + helper.getCurrentBookId(handlerInput));
+    const bookId = handlerInput.requestEnvelope.request.token;
+    await helper.updateDatabaseTimestamp(handlerInput, currentTimestamp, bookId);
+    console.log("Triggered database update with timestamp " + currentTimestamp + " for audiobook ." + bookId);
   }
 }
 
@@ -426,9 +476,13 @@ const helper = {
   },
   setCurrentBookId: function(handlerInput, bookId) {
     const sessionAttributes = handlerInput.attributesManager.getSessionAttributes();
+    console.log("Inside setCurrentBookId. getSessionAttributes():");
+    console.log(handlerInput.attributesManager.getSessionAttributes());
     sessionAttributes.currentBookId = bookId;
   },
   getCurrentBookId: function(handlerInput) {
+    console.log("Inside getCurrentBookId. getSessionAttributes():");
+    console.log(handlerInput.attributesManager.getSessionAttributes());
     return handlerInput.attributesManager.getSessionAttributes().currentBookId;
   },
   getBookAudioUrl: async function(bookObject) {
@@ -463,10 +517,66 @@ const helper = {
     return bookSlotObject;
   },
 
-  updateDatabaseTimestamp: function(handlerInput, currTimestamp) {
-    let deviceId = getDeviceId(handlerInput);
-    audioStorage.updateDatabaseTimestamp(this.getCurrentBookId(handlerInput), currTimestamp, deviceId);
+  //Book ID needs to be presered across sessions so that Resume and time skips work
+  setPersistentCurrentBookId: async function(handlerInput, bookId) {
+    return new Promise((resolve, reject) => {
+      handlerInput.attributesManager.getPersistentAttributes()
+        .then((attributes) => {
+          attributes.currentBookId = bookId;
+          handlerInput.attributesManager.setPersistentAttributes(attributes); //Modify the cached object
+
+          return handlerInput.attributesManager.savePersistentAttributes(); //Actually update the object to the database
+        })
+        .then(() => {
+          resolve();
+        })
+        .catch((error) => {
+          console.log("ERROR in setPersistentBookTimestamp: " + error);
+          reject(error);
+        })
+    })
   },
+  getPersistentCurrentBookId: async function(handlerInput) {
+    return new Promise((resolve, reject) => {
+      handlerInput.attributesManager.getPersistentAttributes()
+        .then((attributes) => {
+          resolve(attributes.currentBookId);
+        })
+        .catch((error) => {
+          console.log("ERROR in getPersistentCurrentBookId: " + error);
+          reject(error);
+        });
+    });
+  },
+
+  updateDatabaseTimestamp: async function(handlerInput, currTimestamp, bookId) {
+    let deviceId = this.getDeviceId(handlerInput);
+
+    return new Promise((resolve, reject) => {
+      audioStorage.updateDatabaseTimestamp(bookId, currTimestamp, deviceId)
+        .then(() => {
+          resolve() //Success
+        })
+        .catch((error) => {
+          console.log("Error in helper.updateDatabasetimestamp: " + error);
+          reject(error);
+        });
+    });
+ 
+  },
+  getDatabaseTimestamp: async function(bookKey) {
+    return new Promise((resolve, reject) => {
+      audioStorage.getDatabaseTimestamp(bookKey)
+        .then(timestamp => {
+          resolve(timestamp);
+        })
+        .catch(error => {
+          console.log("Error in helper.getDatabaseTimestamp: " + error);
+          reject(error);
+        });
+    })
+  },
+
   getDeviceId: function(handlerInput) {
     return handlerInput.requestEnvelope.context.System.device.deviceId;
   }
@@ -499,6 +609,7 @@ exports.handler = (event, context, callback) => {
     FallbackIntentHandler,
     ExitHandler
   )
+  .withPersistenceAdapter(alexaHelper.getPersistenceAdapter())
   .addErrorHandlers(ErrorHandler)
   .lambda()(event, context, callback);
 }
