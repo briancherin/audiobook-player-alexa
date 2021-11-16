@@ -16,7 +16,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "ask-sdk": "^2.0.0",
-    "aws-sdk": "^2.504.0",
+    "aws-sdk": "^2.814.0",
     "firebase": "^7.7.0",
     "jwt-decode": "^2.2.0",
     "xhr2": "^0.2.0"
